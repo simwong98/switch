@@ -1,6 +1,6 @@
 """Claude Code 会话：只读 ~/.claude/projects/*/*.jsonl，产出和 Codex 会话同样结构的任务。
 
-只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"）；
+只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"，接第三方网关时是 "claude-desktop-3p"）；
 `claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样。
 运行状态以对话记录为准；hook 事件（hook.py claude 记下的 UserPromptSubmit / Stop）只用来更早地确认一轮的开始和结束。
 """
@@ -19,7 +19,8 @@ from tb import paths, replies
 
 PROJECTS = str(paths.CLAUDE_HOME / 'projects')
 REGISTRY = str(paths.CLAUDE_HOME / 'sessions')   # 正在运行的 Claude Code 进程会在这里登记自己的状态（busy / idle）
-DESKTOP = str(paths.CLAUDE_DESKTOP / 'claude-code-sessions')  # Claude Desktop 自己的 Code 会话列表
+DESKTOP_DIRS = (paths.CLAUDE_DESKTOP, paths.CLAUDE_DESKTOP_3P)
+DESKTOPS = tuple(str(d / 'claude-code-sessions') for d in DESKTOP_DIRS)  # Claude Desktop 自己的 Code 会话列表
 # 对话记录里的 entrypoint -> 会话从哪开的；不在这里的（sdk-cli、local-agent 等程序调用）不收
 ORIGINS = {'cli': 'cli', 'claude-desktop': 'desktop', 'claude-desktop-3p': 'desktop'}
 DESKTOP_ID = re.compile(r'^local_[A-Za-z0-9-]{1,64}$')  # Desktop 深链接只接受这种 id
@@ -28,7 +29,7 @@ DESKTOP_ID = re.compile(r'^local_[A-Za-z0-9-]{1,64}$')  # Desktop 深链接只�
 def desktop_index():
     """{cliSessionId: Desktop 索引条目}。条目里有 Desktop 显示的标题、是否归档、你最后一次点开它的时刻。"""
     out = {}
-    for p in glob.glob(os.path.join(DESKTOP, '*', '*', 'local_*.json')):
+    for p in [p for root in DESKTOPS for p in glob.glob(os.path.join(root, '*', '*', 'local_*.json'))]:
         try:
             with open(p) as fh:
                 d = json.load(fh)
@@ -94,7 +95,11 @@ def live_status():
     return out
 SKIP_PREFIX = ('<command-', '<local-command', 'Caveat:', '<system-reminder', '<bash-', '<user-memory-input')
 REMINDER = re.compile(r'<system-reminder>.*?</system-reminder>', re.S)
-SCRATCH = str(paths.CLAUDE_DESKTOP / 'scratch-workspaces') + os.sep  # Desktop 无文件夹会话的工作目录
+SCRATCH = tuple(str(d / 'scratch-workspaces') + os.sep for d in DESKTOP_DIRS)  # Desktop 无文件夹会话的工作目录
+HUMAN_COMMAND = re.compile(
+    r'<command-name>(/[^<>\s]+)</command-name>\s*'
+    r'<command-message>.*?</command-message>\s*'
+    r'<command-args>(.*?)</command-args>', re.S)
 STALE_MINUTES = 15
 
 
@@ -137,7 +142,10 @@ def scan(path):
                     continue
                 texts, has_result = [], False
                 if isinstance(content, str):
-                    texts = [content]
+                    # Model-bound slash commands are human turns, unlike local
+                    # settings commands. Keep the submitted command and its time.
+                    command = HUMAN_COMMAND.fullmatch(content.strip()) if o.get('turnOrigin') == 'human' else None
+                    texts = [(' '.join(command.groups()).strip()) if command else content]
                 else:
                     for c in content or []:
                         if not isinstance(c, dict):

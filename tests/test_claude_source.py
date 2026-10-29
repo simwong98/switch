@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [ROOT, os.path.join(ROOT, 'tb')]
@@ -39,6 +40,10 @@ ASK = asst(5, 'tool_use', [{'type': 'tool_use', 'id': 'q1', 'name': 'AskUserQues
 ANSWER = user(6, [{'type': 'tool_result', 'tool_use_id': 'q1'}])
 PROMPT2 = user(7, '再写一段')
 INTERRUPT = user(8, [{'type': 'text', 'text': '[Request interrupted by user]'}])
+
+
+def command(name, args=''):
+    return f'<command-name>/{name}</command-name>\n<command-message>{name}</command-message>\n<command-args>{args}</command-args>'
 
 
 class Derive(unittest.TestCase):
@@ -76,6 +81,32 @@ class Derive(unittest.TestCase):
         result_with_reminder = user(3, [{'type': 'tool_result', 'tool_use_id': 't1'}, reminder])
         self.assertEqual(self.states([PROMPT, TOOL, result_with_reminder]), ['running'])
 
+    def test_session_started_by_a_slash_command(self):
+        def command(sec, name, args=''):
+            return user(sec, f'<command-name>/{name}</command-name>\n<command-message>{name}</command-message>\n'
+                             f'<command-args>{args}</command-args>')
+
+        def scanned(rows):
+            with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as fh:
+                fh.write('\n'.join(json.dumps(r) for r in rows))
+            try:
+                return cs.scan(fh.name)
+            finally:
+                os.unlink(fh.name)
+        # 本地设置命令不算消息，提交给模型的 human 命令立即算作用户输入。
+        effort, goal = command(1, 'effort', 'xhigh'), command(2, 'goal', '修复登录')
+        goal['turnOrigin'] = 'human'
+        expansion = user(2.5, '命令展开后的说明', isMeta=True)
+        f = scanned([effort, goal, expansion, TOOL, RESULT, FINAL])
+        self.assertEqual((f['first_user'], f['first_user_ts'], f['last_user']), ('/goal 修复登录', ts(2), ts(2)))
+        self.assertEqual(self.states([effort, goal, expansion, TOOL]), ['running'])
+        self.assertEqual(self.states([effort, goal, expansion, TOOL, RESULT, FINAL]), ['reply'])
+        # 只执行了 /login 的会话没有回复，仍然不收
+        self.assertEqual(scanned([command(1, 'login')])['first_user'], '')
+        # 本地命令后直接打字：以打字的那句为准，命令不会把这一轮的开始时间提前
+        f = scanned([effort, PROMPT2, FINAL])
+        self.assertEqual((f['first_user'], f['last_user']), ('再写一段', ts(7)))
+
     def test_hooks(self):
         stop = {'event': 'Stop', 'ts': ts(5)}
         self.assertEqual(self.states([PROMPT, TOOL], hook=stop), [])
@@ -84,6 +115,30 @@ class Derive(unittest.TestCase):
         # 中断不触发 Stop：最后一条 hook 是被中断那一轮的提交，不能把它当成还在运行
         late_submit = {'event': 'UserPromptSubmit', 'ts': ts(7.5)}
         self.assertEqual(self.states([PROMPT, FINAL, PROMPT2, INTERRUPT], hook=late_submit), ['aborted'])
+
+    def test_human_command_starts_a_turn_after_a_reply(self):
+        goal = user(7, command('goal', 'Finish the task'), turnOrigin='human')
+        self.assertEqual(self.states([PROMPT, FINAL, goal]), ['running'])
+
+    def test_command_metadata_is_not_a_user_prompt(self):
+        wrapped = command('goal', 'Finish the task')
+        rows = [
+            user(1, command('effort', 'high')),
+            user(2, wrapped),
+            user(3, wrapped, turnOrigin='agent'),
+            user(4, wrapped, turnOrigin='human', isMeta=True),
+            user(5, wrapped, turnOrigin='human', isSidechain=True),
+            user(6, wrapped.removesuffix('</command-args>'), turnOrigin='human'),
+            user(7, wrapped + ' extra text', turnOrigin='human'),
+        ]
+        with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as fh:
+            fh.write('\n'.join(json.dumps(r) for r in rows))
+        try:
+            f = cs.scan(fh.name)
+            self.assertEqual(f['first_user'], '')
+            self.assertIsNone(f['last_user'])
+        finally:
+            os.unlink(fh.name)
 
     def test_live_registry_wins(self):
         self.assertEqual(self.states([PROMPT, FINAL], live={'status': 'busy'}), ['running'])
@@ -100,29 +155,69 @@ class Collect(unittest.TestCase):
         def session(sid, entry):
             return [dict(r, sessionId=sid, entrypoint=entry) for r in (PROMPT, FINAL)]
         with tempfile.TemporaryDirectory() as root:
-            proj, desk, reg = (os.path.join(root, x) for x in ('projects/-w-proj', 'desktop/acct/org', 'registry'))
-            for d in (proj, desk, reg):
+            proj, desk, desk3p, reg = (os.path.join(root, x) for x in
+                                       ('projects/-w-proj', 'desktop/acct/org', 'desktop-3p/acct/org', 'registry'))
+            for d in (proj, desk, desk3p, reg):
                 os.makedirs(d)
-            for sid, entry in (('C', 'cli'), ('D', 'claude-desktop'), ('A', 'claude-desktop'), ('P', 'sdk-cli')):
+            for sid, entry in (('C', 'cli'), ('D', 'claude-desktop'), ('A', 'claude-desktop'), ('P', 'sdk-cli'),
+                               ('T', 'claude-desktop-3p')):
                 with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
                     fh.write('\n'.join(json.dumps(r) for r in session(sid, entry)))
-            for sid, archived in (('D', False), ('A', True)):
-                with open(os.path.join(desk, f'local_{sid.lower()}1.json'), 'w') as fh:
+            # 接第三方模型网关的 Desktop 把索引放在另一个目录
+            for sid, archived, where in (('D', False, desk), ('A', True, desk), ('T', False, desk3p)):
+                with open(os.path.join(where, f'local_{sid.lower()}1.json'), 'w') as fh:
                     json.dump({'sessionId': f'local_{sid.lower()}1', 'cliSessionId': sid, 'title': 'Desktop 里的标题',
                                'isArchived': archived, 'lastFocusedAt': 1791880000000}, fh)
-            saved = cs.PROJECTS, cs.DESKTOP, cs.REGISTRY
-            cs.PROJECTS, cs.DESKTOP, cs.REGISTRY = os.path.join(root, 'projects'), os.path.join(root, 'desktop'), reg
+            saved = cs.PROJECTS, cs.DESKTOPS, cs.REGISTRY
+            cs.PROJECTS, cs.REGISTRY = os.path.join(root, 'projects'), reg
+            cs.DESKTOPS = (os.path.join(root, 'desktop'), os.path.join(root, 'desktop-3p'))
             cs._CACHE.clear()
             try:
                 tasks = {t['id']: t for t in cs.collect(30, NOW, {})}
             finally:
-                cs.PROJECTS, cs.DESKTOP, cs.REGISTRY = saved
+                cs.PROJECTS, cs.DESKTOPS, cs.REGISTRY = saved
                 cs._CACHE.clear()
-        self.assertEqual(set(tasks), {'C', 'D'})
+        self.assertEqual(set(tasks), {'C', 'D', 'T'})
         self.assertEqual((tasks['C']['origin'], tasks['C']['open_url']), ('cli', None))
         d = tasks['D']
         self.assertEqual((d['origin'], d['title'], d['open_url']), ('desktop', 'Desktop 里的标题', 'claude://code/continue?session=local_d1'))
         self.assertTrue(d['focused_at'].startswith('2026-10-13'))
+        t = tasks['T']
+        self.assertEqual((t['origin'], t['title'], t['open_url']), ('desktop', 'Desktop 里的标题', 'claude://code/continue?session=local_t1'))
+        self.assertTrue(t['focused_at'].startswith('2026-10-13'))
+
+    def test_human_command_session_is_collected_without_importing_gateway_sessions(self):
+        with tempfile.TemporaryDirectory() as root:
+            proj = os.path.join(root, 'projects', 'example')
+            os.makedirs(proj)
+            for sid, entry, args in (
+                ('desktop-goal', 'claude-desktop-3p', 'Finish the task\nCheck the result'),
+                ('cli-goal', 'cli', ''),
+                ('gateway-worker', 'sdk-cli', 'Finish the task'),
+            ):
+                rows = [
+                    user(1, command('effort', 'high')),
+                    user(2, command('goal', args), turnOrigin='human',
+                         turnPosition={'promptIndex': 1, 'turnIndex': 1}),
+                    user(3, 'Expanded command instructions', isMeta=True),
+                    TOOL, RESULT,
+                ]
+                with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
+                    fh.write('\n'.join(json.dumps(dict(r, sessionId=sid, entrypoint=entry)) for r in rows))
+            cs._CACHE.clear()
+            try:
+                with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'),
+                                    DESKTOPS=(os.path.join(root, 'desktop'),), REGISTRY=os.path.join(root, 'registry')):
+                    tasks = {t['id']: t for t in cs.collect(30, NOW, {})}
+            finally:
+                cs._CACHE.clear()
+        self.assertEqual(set(tasks), {'desktop-goal', 'cli-goal'})
+        self.assertEqual(tasks['desktop-goal']['title'], '/goal Finish the task\nCheck the result')
+        self.assertEqual(tasks['desktop-goal']['origin'], 'desktop')
+        self.assertEqual(tasks['cli-goal']['title'], '/goal')
+        for task in tasks.values():
+            self.assertEqual(task['started'], ts(2))
+            self.assertEqual(task['states'], ['running'])
 
     def test_unarchive_is_not_seen(self):
         # 取消归档时 Desktop 把 lastFocusedAt 和 resumedAt 设成同一个值，那一刻不一定显示过，不算看过

@@ -104,7 +104,7 @@ Omit `--purge` to keep board data. Unrelated client settings and conversations a
 
 ## Scope and limitations
 
-- Supports local interactive Codex Desktop/CLI and Claude Desktop **Code** / Claude Code CLI sessions. Programmatic/subagent sessions, Claude cloud chat and Cowork are outside scope.
+- Supports local interactive Codex Desktop/CLI and Claude Desktop **Code** / Claude Code CLI sessions, including Claude Desktop connected to a third-party model gateway (its `Claude-3p` data folder) and sessions started with a model-bound slash command such as `/goal`. Programmatic/subagent sessions, Claude cloud chat and Cowork are outside scope.
 - Reads the latest final reply, not full conversation history, tool output or file diffs. Review changes and continue the task in the original client or IDE.
 - Relies on client-local formats that may change. Unknown approval state is not presented as a confirmed wait; Codex approval waits cannot currently be reliably detected.
 - Codex Desktop read state mirrors the client's own classification, including when it marks a previously visible conversation read while opening another. Switch does not add an unread flag when the current native state classifies the reply as read.

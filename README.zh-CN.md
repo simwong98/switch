@@ -104,7 +104,7 @@ python3 taskboard.py uninstall --purge
 
 ## 范围和限制
 
-- 支持本地交互式 Codex Desktop/CLI、Claude Desktop 的 **Code** 会话及 Claude Code CLI。程序调用、子 Agent、Claude 云端聊天和 Cowork 不在范围内。
+- 支持本地交互式 Codex Desktop/CLI、Claude Desktop 的 **Code** 会话及 Claude Code CLI，包括接入第三方模型网关的 Claude Desktop（数据在 `Claude-3p` 目录）和通过 `/goal` 等斜杠命令向模型提交任务的会话。程序调用、子 Agent、Claude 云端聊天和 Cowork 不在范围内。
 - 阅读器展示最新最终回复，不包含完整对话历史、工具输出或文件差异。审查修改、继续任务仍需回到原客户端或 IDE。
 - 依赖客户端本地记录格式，客户端更新可能影响识别。无法确定的授权状态不会显示成确定的等待；目前无法可靠识别 Codex 的授权等待。
 - Codex Desktop 已读状态以客户端自己的判定为准，包括它在打开另一会话时把之前停留的会话顺带标成已读。如果当前原生状态判定回复已读，Switch 不会另外添加未读标记。

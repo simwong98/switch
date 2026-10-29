@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed missing Claude sessions started with a model-bound slash command such as `/goal …`. Commands recorded as human turns now count as user messages immediately; local settings commands such as `/login` and `/effort` remain excluded.
+- Claude Desktop connected to a third-party model gateway keeps its Code session index in `Claude-3p`; Switch now reads it, so those cards get the Desktop title, read state and Open button.
+- 修复通过斜杠命令（如 `/goal …`）向模型提交任务时 Claude 会话不显示的问题：记录为用户轮次的命令立即算作用户消息，`/login`、`/effort` 等本地设置命令仍不收。
+- 接入第三方模型网关的 Claude Desktop 把 Code 会话索引放在 `Claude-3p` 目录，现在也会读取，卡片能拿到 Desktop 标题、已读状态和“打开”按钮。
 - Fixed false Codex inactivity warnings on Windows when an open rollout file keeps an old modification time. New user messages, replies and tool activity now advance the activity timestamp from the log records.
 - 修复 Windows 日志持续追加但文件修改时间未刷新时的 Codex“无更新”误报；普通消息、回复和工具活动均通过日志时间更新活跃状态。
 - Fixed duplicate Windows instances sharing an occupied loopback port; the listener now reserves its port exclusively and the real lifecycle regression also runs on Windows.

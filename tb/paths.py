@@ -27,6 +27,8 @@ elif os.name == 'nt':
     CLAUDE_DESKTOP = (HOME / 'AppData' / 'Roaming' if _SANDBOX else Path(os.environ.get('APPDATA') or HOME / 'AppData' / 'Roaming')) / 'Claude'
 else:
     CLAUDE_DESKTOP = HOME / '.config' / 'Claude'
+# 接第三方模型网关时，Desktop 改用同级的 Claude-3p 目录
+CLAUDE_DESKTOP_3P = CLAUDE_DESKTOP.with_name(CLAUDE_DESKTOP.name + '-3p')
 
 CODEX_HOOKS = CODEX_HOME / 'hooks.json'
 CLAUDE_SETTINGS = CLAUDE_HOME / 'settings.json'
