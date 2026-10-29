@@ -219,6 +219,36 @@ class Collect(unittest.TestCase):
             self.assertEqual(task['started'], ts(2))
             self.assertEqual(task['states'], ['running'])
 
+    def test_forked_session_keeps_its_own_identity(self):
+        # 分叉出的会话（如 /btw 旁路对话）复制了原会话的记录，记录里的 sessionId 仍是原会话的；
+        # 它不能冒充原会话：归档了就不收，没归档就是另一张卡片
+        side_reply = dict(asst(9, 'end_turn', [{'type': 'text', 'text': '旁路回答'}]), sessionId='F')
+        parent = [dict(r, sessionId='P', entrypoint='claude-desktop-3p') for r in (PROMPT, FINAL)]
+        fork = parent + [dict(r, sessionId='F', entrypoint='claude-desktop-3p') for r in (PROMPT2, side_reply)]
+        for archived, expected in ((True, {'P'}), (False, {'P', 'F'})):
+            with tempfile.TemporaryDirectory() as root:
+                proj, desk = os.path.join(root, 'projects', 'w'), os.path.join(root, 'desktop-3p', 'acct', 'org')
+                os.makedirs(proj)
+                os.makedirs(desk)
+                for sid, rows in (('P', parent), ('F', fork)):
+                    with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
+                        fh.write('\n'.join(json.dumps(r) for r in rows))
+                with open(os.path.join(desk, 'local_f1.json'), 'w') as fh:
+                    json.dump({'sessionId': 'local_f1', 'cliSessionId': 'F', 'forkedFromSessionId': 'local_p1',
+                               'isArchived': archived}, fh)
+                cs._CACHE.clear()
+                try:
+                    with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'), REGISTRY=os.path.join(root, 'r'),
+                                        DESKTOPS=(os.path.join(root, 'desktop-3p'),)):
+                        tasks = cs.collect(30, NOW, {})
+                finally:
+                    cs._CACHE.clear()
+            self.assertEqual(sorted(t['id'] for t in tasks), sorted(expected), f'archived={archived}')
+            by_id = {t['id']: t for t in tasks}
+            self.assertEqual(by_id['P']['last_reply'], ts(4), 'The parent card keeps its own latest reply')
+            if 'F' in by_id:
+                self.assertEqual(by_id['F']['last_reply'], ts(9))
+
     def test_unarchive_is_not_seen(self):
         # 取消归档时 Desktop 把 lastFocusedAt 和 resumedAt 设成同一个值，那一刻不一定显示过，不算看过
         with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as fh:

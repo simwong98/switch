@@ -112,7 +112,8 @@ def _later(a, b):
 
 
 def scan(path):
-    f = {'entry': None, 'sid': None, 'cwd': '', 'custom': None, 'ai': None, 'first_user': '', 'first_user_ts': None,
+    # 会话身份取文件名：分叉出的会话（如 /btw 旁路对话）会把原会话的记录连同原会话 ID 一起复制进来
+    f = {'entry': None, 'sid': os.path.splitext(os.path.basename(path))[0], 'cwd': '', 'custom': None, 'ai': None, 'first_user': '', 'first_user_ts': None,
          'last_user': None, 'last_final': None, 'final_head': '', 'interrupt': None, 'asks': {}, 'answered': set(),
          'last_kind': None, 'reply': None}
     with open(path, 'rb') as fh:
@@ -133,7 +134,6 @@ def scan(path):
             if t not in ('user', 'assistant') or o.get('isSidechain'):
                 continue
             f['entry'] = f['entry'] or o.get('entrypoint')
-            f['sid'] = f['sid'] or o.get('sessionId')
             f['cwd'] = o.get('cwd') or f['cwd']
             ts, msg = o.get('timestamp'), o.get('message') or {}
             content = msg.get('content')
@@ -218,7 +218,7 @@ def derive(path, f, now, hook=None, live=None, desk=None):
     if 'approval' in states and waiting_at:
         since.append(waiting_at)
     cwd = f['cwd']
-    sid = f['sid'] or os.path.splitext(os.path.basename(path))[0]
+    sid = f['sid']
     desk = desk or {}
     local_id = desk.get('sessionId') if DESKTOP_ID.match(str(desk.get('sessionId'))) else None
     # Desktop 只在会话从隐藏变为显示时写 lastFocusedAt；取消归档也会写，但那时不一定显示，
