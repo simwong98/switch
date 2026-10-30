@@ -183,7 +183,7 @@ class Collect(unittest.TestCase):
         self.assertEqual((d['origin'], d['title'], d['open_url']), ('desktop', 'Desktop 里的标题', 'claude://code/continue?session=local_d1'))
         self.assertTrue(d['focused_at'].startswith('2026-10-13'))
         t = tasks['T']
-        self.assertEqual((t['origin'], t['title'], t['open_url']), ('desktop', 'Desktop 里的标题', 'claude://code/continue?session=local_t1'))
+        self.assertEqual((t['origin'], t['title'], t['open_url']), ('desktop', 'Desktop 里的标题', 'claude://claude.ai/epitaxy/local_t1'))
         self.assertTrue(t['focused_at'].startswith('2026-10-13'))
 
     def test_human_command_session_is_collected_without_importing_gateway_sessions(self):

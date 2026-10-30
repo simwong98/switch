@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Open only activating Claude Desktop without selecting the conversation in third-party mode. Sessions indexed under `Claude-3p` now use the direct local-session link; standard Desktop links and read-state synchronization are unchanged.
+- 修复第三方模式下“打开”只唤起 Claude Desktop、不切换会话的问题：`Claude-3p` 中的会话改用本地会话直达链接，标准 Desktop 链接及已读同步规则保持不变。
 - Fixed a forked Claude session, such as a `/btw` side chat, posing as its original conversation. The fork copies the original records and session ID, so the original card could show the side chat's reply and state. Sessions are now identified by their transcript file; an archived fork stays hidden and an unarchived fork gets its own card.
 - 修复分叉出的 Claude 会话（如 `/btw` 旁路对话）冒充原会话的问题：分叉会复制原会话的记录和会话 ID，导致原卡片显示旁路对话的回复和状态。现在按会话文件识别会话，已归档的分叉不显示，未归档的分叉单独成卡。
 - Fixed missing Claude sessions started with a model-bound slash command such as `/goal …`. Commands recorded as human turns now count as user messages immediately; local settings commands such as `/login` and `/effort` remain excluded.

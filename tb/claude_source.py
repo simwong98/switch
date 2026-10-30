@@ -29,14 +29,17 @@ DESKTOP_ID = re.compile(r'^local_[A-Za-z0-9-]{1,64}$')  # Desktop 深链接只�
 def desktop_index():
     """{cliSessionId: Desktop 索引条目}。条目里有 Desktop 显示的标题、是否归档、你最后一次点开它的时刻。"""
     out = {}
-    for p in [p for root in DESKTOPS for p in glob.glob(os.path.join(root, '*', '*', 'local_*.json'))]:
-        try:
-            with open(p) as fh:
-                d = json.load(fh)
-        except Exception:
-            continue
-        if d.get('cliSessionId'):
-            out[d['cliSessionId']] = d
+    # DESKTOPS 依次是标准目录和接第三方网关时的 Claude-3p 目录
+    for gateway, root in enumerate(DESKTOPS):
+        for p in glob.glob(os.path.join(root, '*', '*', 'local_*.json')):
+            try:
+                with open(p) as fh:
+                    d = json.load(fh)
+            except Exception:
+                continue
+            if d.get('cliSessionId'):
+                d['_gateway'] = bool(gateway)
+                out[d['cliSessionId']] = d
     return out
 
 
@@ -221,6 +224,10 @@ def derive(path, f, now, hook=None, live=None, desk=None):
     sid = f['sid']
     desk = desk or {}
     local_id = desk.get('sessionId') if DESKTOP_ID.match(str(desk.get('sessionId'))) else None
+    # 第三方模式会拒绝 code/continue，改用 Desktop 的本地会话页面直达链接。
+    open_url = None
+    if local_id:
+        open_url = f'claude://claude.ai/epitaxy/{local_id}' if desk.get('_gateway') else f'claude://code/continue?session={local_id}'
     # Desktop 只在会话从隐藏变为显示时写 lastFocusedAt；取消归档也会写，但那时不一定显示，
     # 它会把 resumedAt 设成同一个值，据此排除
     focused = None if desk.get('lastFocusedAt') == desk.get('resumedAt') else _epoch(desk.get('lastFocusedAt'))
@@ -248,7 +255,7 @@ def derive(path, f, now, hook=None, live=None, desk=None):
         'idle_min': round((now - mtime).total_seconds() / 60),
         'resume': f'cd {shlex.quote(cwd)} && claude --resume {sid}' if cwd else f'claude --resume {sid}',
         # 只有 Desktop 里建的会话能从 Desktop 打开；终端会话不在它的列表里
-        'open_url': f'claude://code/continue?session={local_id}' if local_id else None,
+        'open_url': open_url,
         # 你最后一次在 Desktop 里点开这个会话的时刻，晚于最新回复就算看过
         'focused_at': dt.datetime.fromtimestamp(focused, dt.timezone.utc).isoformat() if focused else None,
     }
