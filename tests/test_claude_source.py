@@ -219,28 +219,56 @@ class Collect(unittest.TestCase):
             self.assertEqual(task['started'], ts(2))
             self.assertEqual(task['states'], ['running'])
 
-    def test_session_seeded_by_another_program_is_not_collected(self):
-        # 模型网关派出的子任务：网关先写好上下文（不带 entrypoint / version），再用 claude --resume 在同一目录接着跑。
-        # 之后的记录和终端会话一模一样，但它不是你开的会话，不能在看板上多出一张 CLI 卡片
-        def strip(r):
-            return {k: v for k, v in r.items() if k not in ('entrypoint', 'version')}
-        seed = [strip(dict(user(0.5, [{'type': 'text', 'text': '交给子任务的上下文'}]), parentUuid=None)),
-                strip(asst(0.6, 'end_turn', [{'type': 'text', 'text': '收到'}]))]
-        own = [dict(r, version='2.1.316') for r in (PROMPT, FINAL)]
+    def test_gateway_bridge_is_hidden_without_hiding_user_sessions(self):
+        # The gateway replays the caller's history, then resumes an interactive
+        # CLI with only its proxy tools. It is an implementation of the Desktop
+        # task, not a second task. Missing metadata alone does not prove this.
+        forwarded = ('<external_system_instructions>\nCaller instructions\n'
+                     '</external_system_instructions>\n\n'
+                     '<conversation_history>\nThe conversation so far, each turn of it answered already.\n'
+                     'Human: Prior request\nAssistant: Prior reply\n'
+                     '</conversation_history>\n\n<current_turn>\nThe turn to answer now:\nDo the task\n</current_turn>')
+        seed = user(0.5, [{'type': 'text', 'text': forwarded}])
+        seed.pop('entrypoint')
+        shape = {'type': 'api-request-shape', 'shape': {'tools': [
+            {'name': 'mcp__magpie__Bash'}, {'name': 'DeferredToolPlaceholder'}, {'name': 'WebSearch'}]}}
+        native = {'type': 'api-request-shape', 'shape': {'tools': [
+            {'name': 'mcp__magpie__Bash'}, {'name': 'Bash'}]}}
+        legacy = dict(seed, message={'role': 'user', 'content': 'Imported conversation'})
+        cases = {
+            'desktop': [dict(r, entrypoint='claude-desktop-3p') for r in (PROMPT, FINAL)],
+            'bridge': [seed, shape, PROMPT, FINAL],
+            'interactive-bridge': [dict(seed, entrypoint='cli'), shape, FINAL],
+            'interrupted-history': [user(0.5, forwarded.replace('Prior reply', '[Request interrupted by user]')),
+                                    shape, PROMPT, FINAL],
+            'cli': [PROMPT, FINAL],
+            'legacy': [legacy, PROMPT, FINAL],
+            'mcp-user': [PROMPT, shape, FINAL],
+            'quoted-envelope': [dict(seed, entrypoint='cli'), native, FINAL],
+            'incomplete-envelope': [user(0.5, forwarded.removesuffix('</current_turn>')), shape, FINAL],
+            'no-tools': [seed, PROMPT, FINAL],
+            'empty-tools': [seed, {'type': 'api-request-shape', 'shape': {'tools': []}}, PROMPT, FINAL],
+            'taken-over': [seed, shape, PROMPT, native, FINAL],
+        }
         with tempfile.TemporaryDirectory() as root:
             proj = os.path.join(root, 'projects', 'w')
             os.makedirs(proj)
-            for sid, rows in (('U', own), ('G', seed + own)):
+            for sid, rows in cases.items():
                 with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
                     fh.write('\n'.join(json.dumps(dict(r, sessionId=sid)) for r in rows))
             cs._CACHE.clear()
+            sources = {}
             try:
                 with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'), REGISTRY=os.path.join(root, 'r'),
                                     DESKTOPS=(os.path.join(root, 'desktop'),)):
-                    tasks = cs.collect(30, NOW, {})
+                    tasks = {t['id']: t for t in cs.collect(30, NOW, {}, sources)}
             finally:
                 cs._CACHE.clear()
-        self.assertEqual([t['id'] for t in tasks], ['U'])
+        expected = set(cases) - {'bridge', 'interactive-bridge', 'interrupted-history'}
+        self.assertEqual(set(tasks), expected)
+        self.assertEqual(set(sources), expected)
+        self.assertEqual(tasks['desktop']['origin'], 'desktop')
+        self.assertTrue(all(tasks[sid]['origin'] == 'cli' for sid in expected - {'desktop'}))
 
     def test_forked_session_keeps_its_own_identity(self):
         # 分叉出的会话（如 /btw 旁路对话）复制了原会话的记录，记录里的 sessionId 仍是原会话的；

@@ -2,7 +2,7 @@
 
 只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"，接第三方网关时是 "claude-desktop-3p"）；
 `claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样；
-别的程序先写好上下文、再用 `claude --resume` 接着跑的会话（如模型网关派出的子任务）也不收。
+Magpie 转发上下文、且只使用网关代理工具的内部 CLI 会话也不收。
 运行状态以对话记录为准；hook 事件（hook.py claude 记下的 UserPromptSubmit / Stop）只用来更早地确认一轮的开始和结束。
 """
 import calendar
@@ -115,11 +115,21 @@ def _later(a, b):
     return a is not None and (b is None or _ts(a) > _ts(b))
 
 
+def _forwarded_prompt(text):
+    # Magpie's renderClaudePrompt wraps the caller's instructions and history.
+    # A mention or a pasted tag alone does not identify a gateway worker.
+    _, end, history = text.partition('\n</external_system_instructions>')
+    return (text.startswith('<external_system_instructions>\n') and bool(end)
+            and history.lstrip().startswith('<conversation_history>\nThe conversation so far, each turn of it answered already.')
+            and bool(re.search(r'</conversation_history>\s*<current_turn>\s*The turn to answer now', history))
+            and text.rstrip().endswith('</current_turn>'))
+
+
 def scan(path):
     # 会话身份取文件名：分叉出的会话（如 /btw 旁路对话）会把原会话的记录连同原会话 ID 一起复制进来
     f = {'entry': None, 'sid': os.path.splitext(os.path.basename(path))[0], 'cwd': '', 'custom': None, 'ai': None, 'first_user': '', 'first_user_ts': None,
          'last_user': None, 'last_final': None, 'final_head': '', 'interrupt': None, 'asks': {}, 'answered': set(),
-         'last_kind': None, 'reply': None, 'seeded': None}
+         'last_kind': None, 'reply': None, 'bridge_tools': False, 'native_tools': False, 'forwarded_prompt': None}
     with open(path, 'rb') as fh:
         offset = 0
         for raw in fh:
@@ -129,6 +139,19 @@ def scan(path):
             except ValueError:
                 continue
             t = o.get('type')
+            if t == 'api-request-shape':
+                shape = o.get('shape')
+                tools = shape.get('tools') if isinstance(shape, dict) else None
+                if isinstance(tools, list):
+                    # Magpie disables native tools except optional WebSearch.
+                    # Preserve a session if a user later resumes it normally.
+                    for tool in tools:
+                        name = tool.get('name') if isinstance(tool, dict) else None
+                        if isinstance(name, str) and name.startswith('mcp__magpie__'):
+                            f['bridge_tools'] = True
+                        elif name not in ('DeferredToolPlaceholder', 'WebSearch'):
+                            f['native_tools'] = True
+                continue
             if t == 'custom-title':
                 f['custom'] = o.get('customTitle') or f['custom']
                 continue
@@ -137,9 +160,6 @@ def scan(path):
                 continue
             if t not in ('user', 'assistant') or o.get('isSidechain'):
                 continue
-            # Claude Code 写的每条记录都带 entrypoint 和 version；开头一条没有，说明对话是别的程序预先写好的
-            if f['seeded'] is None:
-                f['seeded'] = 'entrypoint' not in o and 'version' not in o
             f['entry'] = f['entry'] or o.get('entrypoint')
             f['cwd'] = o.get('cwd') or f['cwd']
             ts, msg = o.get('timestamp'), o.get('message') or {}
@@ -165,6 +185,10 @@ def scan(path):
                 # 逐块去掉注入的内容：Desktop 无文件夹会话会在你的第一条消息前面插一个 <system-reminder> 块
                 texts = [REMINDER.sub('', x).strip() for x in texts]
                 text = '\n'.join(x for x in texts if x and not x.startswith(SKIP_PREFIX)).strip()
+                # Forwarded history may contain an old interruption or command;
+                # recognize its envelope before interpreting it as a live turn.
+                if text and not has_result and f['forwarded_prompt'] is None:
+                    f['forwarded_prompt'] = _forwarded_prompt(text)
                 if '[Request interrupted by user' in text:
                     f['interrupt'], f['last_kind'] = ts, 'interrupt'
                 elif has_result and not text:
@@ -278,7 +302,10 @@ def collect(days, now, hooks, reply_sources=None):
         hit = _CACHE.get(p)
         f = hit[1] if hit and hit[0] == key else scan(p)
         _CACHE[p] = (key, f)
-        if f['entry'] not in ORIGINS or not f['first_user'] or f['seeded']:
+        if f['entry'] not in ORIGINS or not f['first_user']:
+            continue
+        if (f['entry'] == 'cli' and f['bridge_tools'] and not f['native_tools']
+                and f['forwarded_prompt']):
             continue
         desk = desks.get(f['sid'])
         if desk and desk.get('isArchived'):
