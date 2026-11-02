@@ -1,7 +1,8 @@
 """Claude Code 会话：只读 ~/.claude/projects/*/*.jsonl，产出和 Codex 会话同样结构的任务。
 
 只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"，接第三方网关时是 "claude-desktop-3p"）；
-`claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样。
+`claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样；
+别的程序先写好上下文、再用 `claude --resume` 接着跑的会话（如模型网关派出的子任务）也不收。
 运行状态以对话记录为准；hook 事件（hook.py claude 记下的 UserPromptSubmit / Stop）只用来更早地确认一轮的开始和结束。
 """
 import calendar
@@ -118,7 +119,7 @@ def scan(path):
     # 会话身份取文件名：分叉出的会话（如 /btw 旁路对话）会把原会话的记录连同原会话 ID 一起复制进来
     f = {'entry': None, 'sid': os.path.splitext(os.path.basename(path))[0], 'cwd': '', 'custom': None, 'ai': None, 'first_user': '', 'first_user_ts': None,
          'last_user': None, 'last_final': None, 'final_head': '', 'interrupt': None, 'asks': {}, 'answered': set(),
-         'last_kind': None, 'reply': None}
+         'last_kind': None, 'reply': None, 'seeded': None}
     with open(path, 'rb') as fh:
         offset = 0
         for raw in fh:
@@ -136,6 +137,9 @@ def scan(path):
                 continue
             if t not in ('user', 'assistant') or o.get('isSidechain'):
                 continue
+            # Claude Code 写的每条记录都带 entrypoint 和 version；开头一条没有，说明对话是别的程序预先写好的
+            if f['seeded'] is None:
+                f['seeded'] = 'entrypoint' not in o and 'version' not in o
             f['entry'] = f['entry'] or o.get('entrypoint')
             f['cwd'] = o.get('cwd') or f['cwd']
             ts, msg = o.get('timestamp'), o.get('message') or {}
@@ -274,7 +278,7 @@ def collect(days, now, hooks, reply_sources=None):
         hit = _CACHE.get(p)
         f = hit[1] if hit and hit[0] == key else scan(p)
         _CACHE[p] = (key, f)
-        if f['entry'] not in ORIGINS or not f['first_user']:
+        if f['entry'] not in ORIGINS or not f['first_user'] or f['seeded']:
             continue
         desk = desks.get(f['sid'])
         if desk and desk.get('isArchived'):

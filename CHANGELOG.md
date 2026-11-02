@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed a duplicate Claude CLI card next to a Claude Desktop session when a model gateway delegates work. The gateway writes the delegated context into a new transcript and resumes it with `claude --resume` in the same folder, so it looked like a terminal session. Transcripts that do not start with records written by Claude Code are now excluded, like other programmatic sessions.
+- 修复模型网关派出子任务时，Claude Desktop 会话旁边多出一张 Claude CLI 卡片的问题：网关会把交接的上下文写进一份新的对话记录，再在同一目录用 `claude --resume` 接着跑，看起来像终端会话。现在开头不是由 Claude Code 写入的对话记录不再收录，和其他程序调用的会话一样排除。
 - Fixed Open only activating Claude Desktop without selecting the conversation in third-party mode. Sessions indexed under `Claude-3p` now use the direct local-session link; standard Desktop links and read-state synchronization are unchanged.
 - 修复第三方模式下“打开”只唤起 Claude Desktop、不切换会话的问题：`Claude-3p` 中的会话改用本地会话直达链接，标准 Desktop 链接及已读同步规则保持不变。
 - Fixed a forked Claude session, such as a `/btw` side chat, posing as its original conversation. The fork copies the original records and session ID, so the original card could show the side chat's reply and state. Sessions are now identified by their transcript file; an archived fork stays hidden and an unarchived fork gets its own card.

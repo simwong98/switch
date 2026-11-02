@@ -219,6 +219,29 @@ class Collect(unittest.TestCase):
             self.assertEqual(task['started'], ts(2))
             self.assertEqual(task['states'], ['running'])
 
+    def test_session_seeded_by_another_program_is_not_collected(self):
+        # 模型网关派出的子任务：网关先写好上下文（不带 entrypoint / version），再用 claude --resume 在同一目录接着跑。
+        # 之后的记录和终端会话一模一样，但它不是你开的会话，不能在看板上多出一张 CLI 卡片
+        def strip(r):
+            return {k: v for k, v in r.items() if k not in ('entrypoint', 'version')}
+        seed = [strip(dict(user(0.5, [{'type': 'text', 'text': '交给子任务的上下文'}]), parentUuid=None)),
+                strip(asst(0.6, 'end_turn', [{'type': 'text', 'text': '收到'}]))]
+        own = [dict(r, version='2.1.316') for r in (PROMPT, FINAL)]
+        with tempfile.TemporaryDirectory() as root:
+            proj = os.path.join(root, 'projects', 'w')
+            os.makedirs(proj)
+            for sid, rows in (('U', own), ('G', seed + own)):
+                with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
+                    fh.write('\n'.join(json.dumps(dict(r, sessionId=sid)) for r in rows))
+            cs._CACHE.clear()
+            try:
+                with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'), REGISTRY=os.path.join(root, 'r'),
+                                    DESKTOPS=(os.path.join(root, 'desktop'),)):
+                    tasks = cs.collect(30, NOW, {})
+            finally:
+                cs._CACHE.clear()
+        self.assertEqual([t['id'] for t in tasks], ['U'])
+
     def test_forked_session_keeps_its_own_identity(self):
         # 分叉出的会话（如 /btw 旁路对话）复制了原会话的记录，记录里的 sessionId 仍是原会话的；
         # 它不能冒充原会话：归档了就不收，没归档就是另一张卡片
