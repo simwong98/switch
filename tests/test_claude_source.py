@@ -228,6 +228,7 @@ class Collect(unittest.TestCase):
                      '<conversation_history>\nThe conversation so far, each turn of it answered already.\n'
                      'Human: Prior request\nAssistant: Prior reply\n'
                      '</conversation_history>\n\n<current_turn>\nThe turn to answer now:\nDo the task\n</current_turn>')
+        history_only = forwarded.split('</external_system_instructions>\n\n', 1)[1]
         seed = user(0.5, [{'type': 'text', 'text': forwarded}])
         seed.pop('entrypoint')
         shape = {'type': 'api-request-shape', 'shape': {'tools': [
@@ -238,7 +239,14 @@ class Collect(unittest.TestCase):
         cases = {
             'desktop': [dict(r, entrypoint='claude-desktop-3p') for r in (PROMPT, FINAL)],
             'bridge': [seed, shape, PROMPT, FINAL],
+            'bridge-history-only': [dict(seed, message={'role': 'user', 'content': forwarded.split('\n\n', 1)[1]}),
+                                    shape, PROMPT, FINAL],
             'interactive-bridge': [dict(seed, entrypoint='cli'), shape, FINAL],
+            # Lean gateway runs put caller instructions in the system prompt,
+            # so the replayed user message starts directly with history.
+            'lean-bridge': [user(0.5, history_only), shape, FINAL],
+            'lean-interrupted': [user(0.5, history_only.replace('Prior reply', '[Request interrupted by user]')),
+                                 shape, PROMPT, FINAL],
             'interrupted-history': [user(0.5, forwarded.replace('Prior reply', '[Request interrupted by user]')),
                                     shape, PROMPT, FINAL],
             'cli': [PROMPT, FINAL],
@@ -246,6 +254,9 @@ class Collect(unittest.TestCase):
             'mcp-user': [PROMPT, shape, FINAL],
             'quoted-envelope': [dict(seed, entrypoint='cli'), native, FINAL],
             'incomplete-envelope': [user(0.5, forwarded.removesuffix('</current_turn>')), shape, FINAL],
+            'lean-quoted': [user(0.5, history_only), native, FINAL],
+            'lean-incomplete': [user(0.5, history_only.removesuffix('</current_turn>')), shape, FINAL],
+            'broken-system-wrapper': [user(0.5, forwarded.replace('</external_system_instructions>', '')), shape, FINAL],
             'no-tools': [seed, PROMPT, FINAL],
             'empty-tools': [seed, {'type': 'api-request-shape', 'shape': {'tools': []}}, PROMPT, FINAL],
             'taken-over': [seed, shape, PROMPT, native, FINAL],
@@ -264,7 +275,8 @@ class Collect(unittest.TestCase):
                     tasks = {t['id']: t for t in cs.collect(30, NOW, {}, sources)}
             finally:
                 cs._CACHE.clear()
-        expected = set(cases) - {'bridge', 'interactive-bridge', 'interrupted-history'}
+        expected = set(cases) - {'bridge', 'bridge-history-only', 'interactive-bridge', 'interrupted-history',
+                                 'lean-bridge', 'lean-interrupted'}
         self.assertEqual(set(tasks), expected)
         self.assertEqual(set(sources), expected)
         self.assertEqual(tasks['desktop']['origin'], 'desktop')

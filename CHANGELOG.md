@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed duplicate gateway worker cards when Magpie forwards conversation history without a caller-instructions block. Both formats are now recognized; proxy-only tools are still required, so ordinary CLI sessions remain visible.
+- 修复 Magpie 转发对话历史时省略调用方说明块，导致内部 CLI 卡片再次出现的问题。现在兼容两种格式，仍要求同时匹配代理工具定义，保留正常 CLI 会话。
 - Fixed duplicate Claude CLI cards for model-gateway worker sessions. Magpie can replay a Desktop conversation in an internal interactive CLI; Switch recognizes its forwarded context and proxy-only tool definitions and keeps the Desktop card. Missing metadata or Magpie MCP use alone does not hide a user session.
 - 修复模型网关内部会话多出 Claude CLI 卡片的问题：Magpie 会在内部 CLI 中重放 Desktop 的对话。现在结合转发上下文与代理工具定义识别这些内部记录，保留原来的 Desktop 卡片；不会仅因缺少元数据或使用 Magpie MCP 就隐藏用户会话。
 - Fixed Open only activating Claude Desktop without selecting the conversation in third-party mode. Sessions indexed under `Claude-3p` now use the direct local-session link; standard Desktop links and read-state synchronization are unchanged.

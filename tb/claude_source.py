@@ -116,11 +116,15 @@ def _later(a, b):
 
 
 def _forwarded_prompt(text):
-    # Magpie's renderClaudePrompt wraps the caller's instructions and history.
+    # Magpie's renderClaudePrompt wraps the caller's history, preceded by the
+    # caller's instructions when it sends them in the prompt.
     # A mention or a pasted tag alone does not identify a gateway worker.
-    _, end, history = text.partition('\n</external_system_instructions>')
-    return (text.startswith('<external_system_instructions>\n') and bool(end)
-            and history.lstrip().startswith('<conversation_history>\nThe conversation so far, each turn of it answered already.')
+    history = text
+    if text.startswith('<external_system_instructions>\n'):
+        _, end, history = text.partition('\n</external_system_instructions>')
+        if not end:
+            return False
+    return (history.lstrip().startswith('<conversation_history>\nThe conversation so far, each turn of it answered already.')
             and bool(re.search(r'</conversation_history>\s*<current_turn>\s*The turn to answer now', history))
             and text.rstrip().endswith('</current_turn>'))
 
