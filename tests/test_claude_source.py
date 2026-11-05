@@ -312,6 +312,30 @@ class Collect(unittest.TestCase):
             if 'F' in by_id:
                 self.assertEqual(by_id['F']['last_reply'], ts(9))
 
+    def test_session_replaced_after_rewind_is_not_collected(self):
+        # 中断后在 Desktop 里回退：Desktop 从回退点另起一份记录 N 继续，旧记录 O 停在中断那一条。
+        # 旧记录不能一直挂着“已中断”，只留 Desktop 现在用的那一份
+        old = [dict(r, sessionId='O', entrypoint='claude-desktop-3p') for r in (PROMPT, FINAL, PROMPT2, INTERRUPT)]
+        new = old[:2] + [dict(r, sessionId='N', entrypoint='claude-desktop-3p')
+                         for r in (user(9, '换个说法'), asst(10, 'end_turn', [{'type': 'text', 'text': '好的'}]))]
+        with tempfile.TemporaryDirectory() as root:
+            proj, desk = os.path.join(root, 'projects', 'w'), os.path.join(root, 'desktop-3p', 'acct', 'org')
+            os.makedirs(proj)
+            os.makedirs(desk)
+            for sid, rows in (('O', old), ('N', new)):
+                with open(os.path.join(proj, sid + '.jsonl'), 'w') as fh:
+                    fh.write('\n'.join(json.dumps(r) for r in rows))
+            with open(os.path.join(desk, 'local_d1.json'), 'w') as fh:
+                json.dump({'sessionId': 'local_d1', 'cliSessionId': 'N', 'priorCliSessionIds': ['O'], 'isArchived': False}, fh)
+            cs._CACHE.clear()
+            try:
+                with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'), REGISTRY=os.path.join(root, 'r'),
+                                    DESKTOPS=(os.path.join(root, 'desktop-3p'),)):
+                    tasks = cs.collect(30, NOW, {})
+            finally:
+                cs._CACHE.clear()
+        self.assertEqual([(t['id'], t['states']) for t in tasks], [('N', ['reply'])])
+
     def test_unarchive_is_not_seen(self):
         # 取消归档时 Desktop 把 lastFocusedAt 和 resumedAt 设成同一个值，那一刻不一定显示过，不算看过
         with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as fh:

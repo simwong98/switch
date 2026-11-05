@@ -28,8 +28,12 @@ DESKTOP_ID = re.compile(r'^local_[A-Za-z0-9-]{1,64}$')  # Desktop 深链接只�
 
 
 def desktop_index():
-    """{cliSessionId: Desktop 索引条目}。条目里有 Desktop 显示的标题、是否归档、你最后一次点开它的时刻。"""
-    out = {}
+    """{cliSessionId: Desktop 索引条目}。条目里有 Desktop 显示的标题、是否归档、你最后一次点开它的时刻。
+
+    回退（rewind）后 Desktop 会另起一份对话记录继续，旧记录记在 priorCliSessionIds 里、停在回退前；
+    旧记录对应 {'_superseded': True}，不再单独成卡。
+    """
+    out, prior = {}, set()
     # DESKTOPS 依次是标准目录和接第三方网关时的 Claude-3p 目录
     for gateway, root in enumerate(DESKTOPS):
         for p in glob.glob(os.path.join(root, '*', '*', 'local_*.json')):
@@ -41,6 +45,10 @@ def desktop_index():
             if d.get('cliSessionId'):
                 d['_gateway'] = bool(gateway)
                 out[d['cliSessionId']] = d
+                ids = d.get('priorCliSessionIds')
+                prior.update(i for i in ids if isinstance(i, str) and i != d['cliSessionId']) if isinstance(ids, list) else None
+    for sid in prior - out.keys():
+        out[sid] = {'_superseded': True}
     return out
 
 
@@ -312,7 +320,7 @@ def collect(days, now, hooks, reply_sources=None):
                 and f['forwarded_prompt']):
             continue
         desk = desks.get(f['sid'])
-        if desk and desk.get('isArchived'):
+        if desk and (desk.get('isArchived') or desk.get('_superseded')):
             continue                            # 在 Desktop 里归档了，和 Codex 归档的会话一样不收
         task = derive(p, f, now, hooks.get(f['sid']), lives.get(f['sid']), desk)
         tasks.append(task)
