@@ -107,6 +107,7 @@ Omit `--purge` to keep board data. Unrelated client settings and conversations a
 - Supports local interactive Codex Desktop/CLI and Claude Desktop **Code** / Claude Code CLI sessions, including Claude Desktop connected to a third-party model gateway (its `Claude-3p` data folder) and sessions started with a model-bound slash command such as `/goal`. Programmatic/subagent sessions, Claude cloud chat and Cowork are outside scope.
 - Reads the latest final reply, not full conversation history, tool output or file diffs. Review changes and continue the task in the original client or IDE.
 - Relies on client-local formats that may change. Unknown approval state is not presented as a confirmed wait; Codex approval waits cannot currently be reliably detected.
+- A Claude Code CLI session whose requests offer only Magpie proxy tools (`mcp__magpie__*`) and no native tool is treated as a model-gateway worker session and hidden. This includes a CLI session you start yourself with only Magpie tools enabled; it appears once a native tool is enabled in it.
 - Codex Desktop read state mirrors the client's own classification, including when it marks a previously visible conversation read while opening another. Switch does not add an unread flag when the current native state classifies the reply as read.
 - The backend listens on loopback only. It is a personal local tool, not a multi-user service; do not expose its port on a network. See [Security](SECURITY.md).
 

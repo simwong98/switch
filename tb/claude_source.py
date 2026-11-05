@@ -2,7 +2,8 @@
 
 只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"，接第三方网关时是 "claude-desktop-3p"）；
 `claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样；
-只用 Magpie 网关代理工具（mcp__magpie__*）、没有任何原生工具的 CLI 会话是网关的内部会话，也不收。
+只用 Magpie 网关代理工具（mcp__magpie__*）、没有任何原生工具的 CLI 会话按网关内部会话处理，也不收；
+用户自己这样启动的会话同样会被隐藏，启用原生工具后才恢复显示。
 运行状态以对话记录为准；hook 事件（hook.py claude 记下的 UserPromptSubmit / Stop）只用来更早地确认一轮的开始和结束。
 """
 import calendar
@@ -300,6 +301,7 @@ def collect(days, now, hooks, reply_sources=None):
             continue
         # Magpie launches its workers with native tools disabled and only its own proxy
         # server; the prompt format varies by gateway mode, so it is not checked.
+        # Such sessions are treated as workers, including a user's own proxy-only session.
         if f['entry'] == 'cli' and f['bridge_tools'] and not f['native_tools']:
             continue
         desk = desks.get(f['sid'])
