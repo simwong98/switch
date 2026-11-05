@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Fixed a Claude Desktop card stuck at Interrupted after rewinding. Desktop continues a rewound conversation in a new transcript and lists the old one in `priorCliSessionIds`; the old transcript no longer gets its own card.
-- 修复 Claude Desktop 中断后回退，旧卡片一直停在“已中断”的问题：Desktop 回退后会另起一份对话记录继续，旧记录列在 `priorCliSessionIds` 里，现在旧记录不再单独成卡。
+- Fixed Claude Desktop cards stuck at Interrupted after rewinding. The original card now follows the current transcript, retaining its grouping, position and read marks instead of leaving a stale card behind. Independent forks remain separate.
+- 修复 Claude Desktop 中断后回退，卡片一直停在“已中断”的问题：原卡片现在跟随当前对话记录更新，保留分组、排序和已读标记，不再留下过期卡片；独立分叉的会话仍各自显示。
 - Fixed duplicate gateway worker cards when Magpie forwards conversation history without a caller-instructions block. Both formats are now recognized; proxy-only tools are still required, so ordinary CLI sessions remain visible.
 - 修复 Magpie 转发对话历史时省略调用方说明块，导致内部 CLI 卡片再次出现的问题。现在兼容两种格式，仍要求同时匹配代理工具定义，保留正常 CLI 会话。
 - Fixed duplicate Claude CLI cards for model-gateway worker sessions. Magpie can replay a Desktop conversation in an internal interactive CLI; Switch recognizes its forwarded context and proxy-only tool definitions and keeps the Desktop card. Missing metadata or Magpie MCP use alone does not hide a user session.

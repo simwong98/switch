@@ -671,6 +671,33 @@ function syncMembers(){
   if (!store.initAt) return;
   let changed = false;
   for (const t of DATA.tasks){
+    // Older versions could collect the replacement transcript as a new card.
+    // Prefer the original card's choices; recover replacement-only settings.
+    const aliases = (t.aliases || []).filter(id => id !== t.id);
+    const saved = [t.id, ...aliases.slice().reverse()].find(id => id in store.members || id in store.removed);
+    if (saved && saved !== t.id){
+      for (const key of ['members','removed','prio']){
+        if (saved in store[key] && !(t.id in store[key])) store[key][t.id] = store[key][saved];
+      }
+      changed = true;
+    }
+    if (!(t.id in store.prio)){
+      const grouped = aliases.slice().reverse().find(id => id in store.prio);
+      if (grouped){ store.prio[t.id] = store.prio[grouped]; changed = true; }
+    }
+    for (const id of aliases){
+      if (store.seen[id] && (!store.seen[t.id] || new Date(store.seen[id]) > new Date(store.seen[t.id]))){
+        store.seen[t.id] = store.seen[id];
+        store.seenAt[t.id] = store.seenAt[id] || store.seen[id];
+      }
+      if (store.order.includes(id)){
+        store.order = store.order.includes(t.id) ? store.order.filter(x => x !== id) : store.order.map(x => x === id ? t.id : x);
+        changed = true;
+      }
+      for (const key of ['members','removed','prio','seen','seenAt']){
+        if (id in store[key]){ delete store[key][id]; changed = true; }
+      }
+    }
     if (!store.members[t.id] && !store.removed[t.id] && t.started && new Date(t.started) > new Date(store.initAt)){ store.members[t.id] = true; changed = true; }
   }
   if (changed) save();

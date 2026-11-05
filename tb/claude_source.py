@@ -323,6 +323,13 @@ def collect(days, now, hooks, reply_sources=None):
         if desk and (desk.get('isArchived') or desk.get('_superseded')):
             continue                            # 在 Desktop 里归档了，和 Codex 归档的会话一样不收
         task = derive(p, f, now, hooks.get(f['sid']), lives.get(f['sid']), desk)
+        # Rewind changes the transcript, not the task. Keep the original board
+        # identity while hooks, process status and reply content use the new ID.
+        prior = (desk or {}).get('priorCliSessionIds')
+        replaced = [sid for sid in prior if isinstance(sid, str) and desks.get(sid, {}).get('_superseded')] if isinstance(prior, list) else []
+        if replaced:
+            task['id'] = replaced[0]
+            task['aliases'] = replaced[1:] + [f['sid']]
         tasks.append(task)
         if reply_sources is not None:
             reply_sources[task['id']] = (p, 'claude', f.get('reply'))

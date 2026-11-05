@@ -55,6 +55,34 @@ function harness(initial = {}, missing = false){
 }
 
 (async()=>{
+  // Rewind replaces the transcript but retains the original card's placement.
+  // Recover settings created under a replacement ID by older versions, once.
+  const rewound = harness({members:{original:true,new:true},prio:{original:'later',new:'high'},
+    order:['before','original','after','new'],seen:{new:'2026-10-15T01:00:00Z'},seenAt:{new:'2026-10-15T01:01:00Z'}});
+  const rewindTask = "DATA.tasks=[{id:'original',aliases:['middle','new'],agent:'claude',states:['reply'],started:'2026-10-13T00:00:00Z'}]; syncMembers()";
+  rewound.run(rewindTask); await rewound.run('settingsPromise');
+  assert.deepStrictEqual(plain(rewound.run('store.members')),{original:true});
+  assert.deepStrictEqual(plain(rewound.run('store.prio')),{original:'later'});
+  assert.deepStrictEqual(plain(rewound.run('store.order')),['before','original','after']);
+  assert.strictEqual(rewound.run('store.seen.original'),'2026-10-15T01:00:00Z');
+  assert.strictEqual(rewound.run('store.seenAt.original'),'2026-10-15T01:01:00Z');
+  const migratedRevision = rewound.state.envelope.revision;
+  rewound.run('syncMembers()'); await tick();
+  assert.strictEqual(rewound.state.envelope.revision,migratedRevision,'Polling must not keep saving the migration');
+  assert.deepStrictEqual(plain(harness(rewound.state.envelope.settings).run('store.prio')),{original:'later'});
+
+  const replacementOnly = harness({members:{new:true},prio:{new:'high'},order:['before','new','after']});
+  replacementOnly.run(rewindTask); await replacementOnly.run('settingsPromise');
+  assert.ok(replacementOnly.run('onBoard(DATA.tasks[0])'));
+  assert.strictEqual(replacementOnly.run('colOf(DATA.tasks[0])'),'high');
+  assert.deepStrictEqual(plain(replacementOnly.run('store.order')),['before','original','after']);
+  const removedOriginal = harness({removed:{original:true},members:{new:true},order:['new']});
+  removedOriginal.run(rewindTask); await removedOriginal.run('settingsPromise');
+  assert.strictEqual(removedOriginal.run('onBoard(DATA.tasks[0])'),false,'A removed task stays removed after rewind');
+  const removedReplacement = harness({removed:{new:true}});
+  removedReplacement.run(rewindTask); await removedReplacement.run('settingsPromise');
+  assert.deepStrictEqual(plain(removedReplacement.run('store.removed')),{original:true});
+
   // Opening a client queues only a read mark. It must not create a leave-page
   // prompt, even while that save is pending or has failed.
   const opened=harness({members:{one:true}});

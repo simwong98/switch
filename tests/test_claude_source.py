@@ -312,7 +312,7 @@ class Collect(unittest.TestCase):
             if 'F' in by_id:
                 self.assertEqual(by_id['F']['last_reply'], ts(9))
 
-    def test_session_replaced_after_rewind_is_not_collected(self):
+    def test_rewind_keeps_card_identity_with_current_transcript(self):
         # 中断后在 Desktop 里回退：Desktop 从回退点另起一份记录 N 继续，旧记录 O 停在中断那一条。
         # 旧记录不能一直挂着“已中断”，只留 Desktop 现在用的那一份
         old = [dict(r, sessionId='O', entrypoint='claude-desktop-3p') for r in (PROMPT, FINAL, PROMPT2, INTERRUPT)]
@@ -331,10 +331,33 @@ class Collect(unittest.TestCase):
             try:
                 with patch.multiple(cs, PROJECTS=os.path.join(root, 'projects'), REGISTRY=os.path.join(root, 'r'),
                                     DESKTOPS=(os.path.join(root, 'desktop-3p'),)):
-                    tasks = cs.collect(30, NOW, {})
+                    sources = {}
+                    tasks = cs.collect(30, NOW, {}, sources)
+                    current = tasks[0]
+                    # Hooks remain keyed by the current CLI ID, not the card ID.
+                    running = cs.collect(30, NOW, {'N': {'event': 'UserPromptSubmit', 'ts': ts(11)}})
+                    # Rewinding again preserves the same card and aliases.
+                    with open(os.path.join(proj, 'N2.jsonl'), 'w') as fh:
+                        fh.write('\n'.join(json.dumps(dict(r, sessionId='N2')) for r in new))
+                    with open(os.path.join(desk, 'local_d1.json'), 'w') as fh:
+                        json.dump({'sessionId': 'local_d1', 'cliSessionId': 'N2', 'priorCliSessionIds': ['O','N'], 'isArchived': False}, fh)
+                    again = cs.collect(30, NOW, {})
+                    with open(os.path.join(desk, 'local_d1.json'), 'w') as fh:
+                        json.dump({'sessionId': 'local_d1', 'cliSessionId': 'N2', 'priorCliSessionIds': ['O','N'], 'isArchived': True}, fh)
+                    self.assertEqual(cs.collect(30, NOW, {}), [])
+                    store = cs.replies.ReplyStore()
+                    store.update(sources)
+                    self.assertEqual(store.read('O', current['reply_id'])['text'], '好的')
             finally:
                 cs._CACHE.clear()
-        self.assertEqual([(t['id'], t['states']) for t in tasks], [('N', ['reply'])])
+        self.assertEqual([(t['id'], t['states']) for t in tasks], [('O', ['reply'])])
+        self.assertEqual(current['aliases'], ['N'])
+        self.assertEqual(current['last_reply'], ts(10))
+        self.assertEqual(current['open_url'], 'claude://code/continue?session=local_d1')
+        self.assertTrue(current['resume'].endswith('claude --resume N'))
+        self.assertTrue(sources['O'][0].endswith('/N.jsonl'))
+        self.assertEqual([(t['id'], t['states']) for t in running], [('O', ['running'])])
+        self.assertEqual([(t['id'], t['aliases']) for t in again], [('O', ['N','N2'])])
 
     def test_unarchive_is_not_seen(self):
         # 取消归档时 Desktop 把 lastFocusedAt 和 resumedAt 设成同一个值，那一刻不一定显示过，不算看过
