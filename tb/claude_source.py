@@ -2,7 +2,7 @@
 
 只收你自己开的会话：终端里的（entrypoint == "cli"）和 Claude Desktop 里的（"claude-desktop"，接第三方网关时是 "claude-desktop-3p"）；
 `claude -p`、SDK、Parley 这类程序调用的会话会被排除，和 Codex 一侧排除 codex_exec 一样；
-Magpie 转发上下文、且只使用网关代理工具的内部 CLI 会话也不收。
+只用 Magpie 网关代理工具（mcp__magpie__*）、没有任何原生工具的 CLI 会话是网关的内部会话，也不收。
 运行状态以对话记录为准；hook 事件（hook.py claude 记下的 UserPromptSubmit / Stop）只用来更早地确认一轮的开始和结束。
 """
 import calendar
@@ -123,25 +123,11 @@ def _later(a, b):
     return a is not None and (b is None or _ts(a) > _ts(b))
 
 
-def _forwarded_prompt(text):
-    # Magpie's renderClaudePrompt wraps the caller's history, preceded by the
-    # caller's instructions when it sends them in the prompt.
-    # A mention or a pasted tag alone does not identify a gateway worker.
-    history = text
-    if text.startswith('<external_system_instructions>\n'):
-        _, end, history = text.partition('\n</external_system_instructions>')
-        if not end:
-            return False
-    return (history.lstrip().startswith('<conversation_history>\nThe conversation so far, each turn of it answered already.')
-            and bool(re.search(r'</conversation_history>\s*<current_turn>\s*The turn to answer now', history))
-            and text.rstrip().endswith('</current_turn>'))
-
-
 def scan(path):
     # 会话身份取文件名：分叉出的会话（如 /btw 旁路对话）会把原会话的记录连同原会话 ID 一起复制进来
     f = {'entry': None, 'sid': os.path.splitext(os.path.basename(path))[0], 'cwd': '', 'custom': None, 'ai': None, 'first_user': '', 'first_user_ts': None,
          'last_user': None, 'last_final': None, 'final_head': '', 'interrupt': None, 'asks': {}, 'answered': set(),
-         'last_kind': None, 'reply': None, 'bridge_tools': False, 'native_tools': False, 'forwarded_prompt': None}
+         'last_kind': None, 'reply': None, 'bridge_tools': False, 'native_tools': False}
     with open(path, 'rb') as fh:
         offset = 0
         for raw in fh:
@@ -197,10 +183,6 @@ def scan(path):
                 # 逐块去掉注入的内容：Desktop 无文件夹会话会在你的第一条消息前面插一个 <system-reminder> 块
                 texts = [REMINDER.sub('', x).strip() for x in texts]
                 text = '\n'.join(x for x in texts if x and not x.startswith(SKIP_PREFIX)).strip()
-                # Forwarded history may contain an old interruption or command;
-                # recognize its envelope before interpreting it as a live turn.
-                if text and not has_result and f['forwarded_prompt'] is None:
-                    f['forwarded_prompt'] = _forwarded_prompt(text)
                 if '[Request interrupted by user' in text:
                     f['interrupt'], f['last_kind'] = ts, 'interrupt'
                 elif has_result and not text:
@@ -316,8 +298,9 @@ def collect(days, now, hooks, reply_sources=None):
         _CACHE[p] = (key, f)
         if f['entry'] not in ORIGINS or not f['first_user']:
             continue
-        if (f['entry'] == 'cli' and f['bridge_tools'] and not f['native_tools']
-                and f['forwarded_prompt']):
+        # Magpie launches its workers with native tools disabled and only its own proxy
+        # server; the prompt format varies by gateway mode, so it is not checked.
+        if f['entry'] == 'cli' and f['bridge_tools'] and not f['native_tools']:
             continue
         desk = desks.get(f['sid'])
         if desk and (desk.get('isArchived') or desk.get('_superseded')):

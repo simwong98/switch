@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Gateway worker sessions are now recognized by their tool set alone: a CLI session whose requests offer only Magpie proxy tools (`mcp__magpie__*`) and never a native tool is excluded, whatever its prompt format. A fresh gateway run that types the conversation as a plain first prompt had brought back duplicate Claude CLI cards.
+- 网关内部会话改为只按工具集识别：CLI 会话的请求里只有 Magpie 代理工具（`mcp__magpie__*`）、从未出现原生工具，就不再收录，不再依赖转发格式。网关新起的会话把对话直接作为第一条普通消息发送，导致重复的 Claude CLI 卡片再次出现。
 - Fixed Claude Desktop cards stuck at Interrupted after rewinding. The original card now follows the current transcript, retaining its grouping, position and read marks instead of leaving a stale card behind. Independent forks remain separate.
 - 修复 Claude Desktop 中断后回退，卡片一直停在“已中断”的问题：原卡片现在跟随当前对话记录更新，保留分组、排序和已读标记，不再留下过期卡片；独立分叉的会话仍各自显示。
 - Fixed duplicate gateway worker cards when Magpie forwards conversation history without a caller-instructions block. Both formats are now recognized; proxy-only tools are still required, so ordinary CLI sessions remain visible.

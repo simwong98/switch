@@ -222,7 +222,8 @@ class Collect(unittest.TestCase):
     def test_gateway_bridge_is_hidden_without_hiding_user_sessions(self):
         # The gateway replays the caller's history, then resumes an interactive
         # CLI with only its proxy tools. It is an implementation of the Desktop
-        # task, not a second task. Missing metadata alone does not prove this.
+        # task, not a second task. The prompt format varies by gateway mode, so the
+        # tool set decides: only mcp__magpie__ tools and no native tool in any request.
         forwarded = ('<external_system_instructions>\nCaller instructions\n'
                      '</external_system_instructions>\n\n'
                      '<conversation_history>\nThe conversation so far, each turn of it answered already.\n'
@@ -251,6 +252,9 @@ class Collect(unittest.TestCase):
                                     shape, PROMPT, FINAL],
             'cli': [PROMPT, FINAL],
             'legacy': [legacy, PROMPT, FINAL],
+            # A fresh gateway run types the rendered conversation as a plain first prompt.
+            'rendered-transcript': [user(0.5, 'Human: Prior request\nAssistant: Prior reply\nHuman: Do the task'),
+                                    shape, FINAL],
             'mcp-user': [PROMPT, shape, FINAL],
             'quoted-envelope': [dict(seed, entrypoint='cli'), native, FINAL],
             'incomplete-envelope': [user(0.5, forwarded.removesuffix('</current_turn>')), shape, FINAL],
@@ -275,8 +279,7 @@ class Collect(unittest.TestCase):
                     tasks = {t['id']: t for t in cs.collect(30, NOW, {}, sources)}
             finally:
                 cs._CACHE.clear()
-        expected = set(cases) - {'bridge', 'bridge-history-only', 'interactive-bridge', 'interrupted-history',
-                                 'lean-bridge', 'lean-interrupted'}
+        expected = {'desktop', 'cli', 'legacy', 'quoted-envelope', 'lean-quoted', 'no-tools', 'empty-tools', 'taken-over'}
         self.assertEqual(set(tasks), expected)
         self.assertEqual(set(sources), expected)
         self.assertEqual(tasks['desktop']['origin'], 'desktop')
