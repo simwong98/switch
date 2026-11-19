@@ -42,8 +42,11 @@ PROMPT2 = user(7, '再写一段')
 INTERRUPT = user(8, [{'type': 'text', 'text': '[Request interrupted by user]'}])
 
 
-def command(name, args=''):
-    return f'<command-name>/{name}</command-name>\n<command-message>{name}</command-message>\n<command-args>{args}</command-args>'
+def command(name, args='', message_first=False):
+    fields = [f'<command-name>/{name}</command-name>', f'<command-message>{name}</command-message>']
+    if message_first:
+        fields.reverse()
+    return '\n'.join(fields + [f'<command-args>{args}</command-args>'])
 
 
 class Derive(unittest.TestCase):
@@ -117,8 +120,10 @@ class Derive(unittest.TestCase):
         self.assertEqual(self.states([PROMPT, FINAL, PROMPT2, INTERRUPT], hook=late_submit), ['aborted'])
 
     def test_human_command_starts_a_turn_after_a_reply(self):
-        goal = user(7, command('goal', 'Finish the task'), turnOrigin='human')
-        self.assertEqual(self.states([PROMPT, FINAL, goal]), ['running'])
+        for message_first in (False, True):
+            with self.subTest(message_first=message_first):
+                goal = user(7, command('workflow:sync', 'Finish the task', message_first), turnOrigin='human')
+                self.assertEqual(self.states([PROMPT, FINAL, goal]), ['running'])
 
     def test_command_metadata_is_not_a_user_prompt(self):
         wrapped = command('goal', 'Finish the task')
@@ -130,6 +135,10 @@ class Derive(unittest.TestCase):
             user(5, wrapped, turnOrigin='human', isSidechain=True),
             user(6, wrapped.removesuffix('</command-args>'), turnOrigin='human'),
             user(7, wrapped + ' extra text', turnOrigin='human'),
+            user(8, command('model', 'fast', message_first=True)),
+            user(9, command('workflow:sync', message_first=True), turnOrigin='agent'),
+            user(10, command('workflow:sync', message_first=True), turnOrigin='human', isMeta=True),
+            user(11, command('workflow:sync', message_first=True), turnOrigin='human', isSidechain=True),
         ]
         with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as fh:
             fh.write('\n'.join(json.dumps(r) for r in rows))
@@ -194,10 +203,13 @@ class Collect(unittest.TestCase):
                 ('desktop-goal', 'claude-desktop-3p', 'Finish the task\nCheck the result'),
                 ('cli-goal', 'cli', ''),
                 ('gateway-worker', 'sdk-cli', 'Finish the task'),
+                ('desktop-skill', 'claude-desktop', 'Finish the task\nCheck the result'),
+                ('cli-skill', 'cli', ''),
             ):
+                is_skill = sid.endswith('-skill')
                 rows = [
                     user(1, command('effort', 'high')),
-                    user(2, command('goal', args), turnOrigin='human',
+                    user(2, command('workflow:sync' if is_skill else 'goal', args, message_first=is_skill), turnOrigin='human',
                          turnPosition={'promptIndex': 1, 'turnIndex': 1}),
                     user(3, 'Expanded command instructions', isMeta=True),
                     TOOL, RESULT,
@@ -211,10 +223,13 @@ class Collect(unittest.TestCase):
                     tasks = {t['id']: t for t in cs.collect(30, NOW, {})}
             finally:
                 cs._CACHE.clear()
-        self.assertEqual(set(tasks), {'desktop-goal', 'cli-goal'})
+        self.assertEqual(set(tasks), {'desktop-goal', 'cli-goal', 'desktop-skill', 'cli-skill'})
         self.assertEqual(tasks['desktop-goal']['title'], '/goal Finish the task\nCheck the result')
         self.assertEqual(tasks['desktop-goal']['origin'], 'desktop')
         self.assertEqual(tasks['cli-goal']['title'], '/goal')
+        self.assertEqual(tasks['desktop-skill']['title'], '/workflow:sync Finish the task\nCheck the result')
+        self.assertEqual(tasks['desktop-skill']['origin'], 'desktop')
+        self.assertEqual(tasks['cli-skill']['title'], '/workflow:sync')
         for task in tasks.values():
             self.assertEqual(task['started'], ts(2))
             self.assertEqual(task['states'], ['running'])

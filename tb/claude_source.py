@@ -110,8 +110,8 @@ SKIP_PREFIX = ('<command-', '<local-command', 'Caveat:', '<system-reminder', '<b
 REMINDER = re.compile(r'<system-reminder>.*?</system-reminder>', re.S)
 SCRATCH = tuple(str(d / 'scratch-workspaces') + os.sep for d in DESKTOP_DIRS)  # Desktop 无文件夹会话的工作目录
 HUMAN_COMMAND = re.compile(
-    r'<command-name>(/[^<>\s]+)</command-name>\s*'
-    r'<command-message>.*?</command-message>\s*'
+    r'(?:<command-name>(/[^<>\s]+)</command-name>\s*<command-message>.*?</command-message>'
+    r'|<command-message>.*?</command-message>\s*<command-name>(/[^<>\s]+)</command-name>)\s*'
     r'<command-args>(.*?)</command-args>', re.S)
 STALE_MINUTES = 15
 
@@ -169,9 +169,10 @@ def scan(path):
                 texts, has_result = [], False
                 if isinstance(content, str):
                     # Model-bound slash commands are human turns, unlike local
-                    # settings commands. Keep the submitted command and its time.
+                    # settings commands. Built-ins put the name first; skills
+                    # put the message first. Keep the command and submission time.
                     command = HUMAN_COMMAND.fullmatch(content.strip()) if o.get('turnOrigin') == 'human' else None
-                    texts = [(' '.join(command.groups()).strip()) if command else content]
+                    texts = [(' '.join(part for part in command.groups() if part).strip()) if command else content]
                 else:
                     for c in content or []:
                         if not isinstance(c, dict):

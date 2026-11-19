@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed missing sessions started with a Claude skill command. Human command records are now recognized with either command-name or command-message first, including commands sent after an earlier reply.
+- 修复以 Claude 技能命令开始的会话不显示的问题：命令名与命令说明的两种排列顺序都能识别，后续轮次使用技能命令时也会正常更新状态。
 - Gateway worker sessions are now recognized by their tool set alone: a CLI session whose requests offer only Magpie proxy tools (`mcp__magpie__*`) and never a native tool is excluded, whatever its prompt format. A fresh gateway run that types the conversation as a plain first prompt had brought back duplicate Claude CLI cards.
 - 网关内部会话改为只按工具集识别：CLI 会话的请求里只有 Magpie 代理工具（`mcp__magpie__*`）、从未出现原生工具，就不再收录，不再依赖转发格式。网关新起的会话把对话直接作为第一条普通消息发送，导致重复的 Claude CLI 卡片再次出现。
 - Fixed Claude Desktop cards stuck at Interrupted after rewinding. The original card now follows the current transcript, retaining its grouping, position and read marks instead of leaving a stale card behind. Independent forks remain separate.
